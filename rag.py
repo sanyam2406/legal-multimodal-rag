@@ -28,11 +28,29 @@ print("Number of documents loaded:", len(docs))
 if docs:
     print("First document sample:", docs[0].page_content[:500])
 
+# Extract case names from all documents (generic)
+case_names = set()
+case_to_source = {}
+import re
+
+for doc in docs:
+    source = doc.metadata.get("source", "")
+    # Look for "vs" patterns in documents
+    matches = re.findall(r'([A-Za-z\s]+)\s+vs\s+([A-Za-z\s]+)', doc.page_content[:2000])
+    for match in matches:
+        case_name = f"{match[0].strip()} vs {match[1].strip()}"
+        case_names.add(case_name)
+        case_to_source[case_name] = source
+
+print(f"Found {len(case_names)} case names:")
+for case in list(case_names)[:5]:  # Show first 5
+    print(f"  - {case}")
+
 
 # 2) Split into chunks
 splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=100
+    chunk_size=1500,
+    chunk_overlap=300
 )
 chunks = splitter.split_documents(docs)
 print("Number of chunks created:", len(chunks))
@@ -98,52 +116,31 @@ def detect_query_type(question):
 # 7) Main RAG function
 def find_case_source(question):
     q = question.lower()
-
-    # simple case-name hints
-    case_hints = [
-        "m.nagarajan",
-        "m. nagarajan",
-        "nagarajan",
-        "deputy commercial tax officer"
-    ]
-
-    # Search top candidates using raw question
-    candidates = vectordb.similarity_search_with_score(question, k=20)
-
-    source_scores = {}
-
-    for doc, score in candidates:
-        text = doc.page_content.lower()
-        source = doc.metadata.get("source")
-
-
-
-        match_count = 0
-        for hint in case_hints:
-            if hint in text:
-                match_count += 1
-
-        # lower score is better in Chroma distance
-        # more hint matches should help
-        final_score = match_count - score
-
-        if source not in source_scores or final_score > source_scores[source]:
-            source_scores[source] = final_score
-
-    if not source_scores:
-        return None
-
-    best_source = max(source_scores, key=source_scores.get)
-    return best_source
+    
+    # 1. Try PDF number first (most reliable)
+    pdf_numbers = re.findall(r'(\d{8})\.pdf', q)
+    if pdf_numbers:
+        return f"data/{pdf_numbers[0]}.pdf"
+    
+    # 2. Try generic case name matching
+    for case_name in case_names:
+        if case_name.lower() in q:
+            return case_to_source.get(case_name)
+    
+    # 3. Try partial case name matching
+    for case_name in case_names:
+        case_parts = case_name.lower().split(" vs ")
+        if any(part in q for part in case_parts):
+            return case_to_source.get(case_name)
+    
+    return None
 
 
 def ask_question(question):
     query_type = detect_query_type(question)
 
-    # First try to identify exact case PDF
-    forced_source = None
-    if "nagarajan" in question.lower():
-        forced_source = find_case_source(question)
+    # First try to identify exact case PDF (generic for all PDFs)
+    forced_source = find_case_source(question)
 
     if query_type == "reasoning":
         retrieval_query = (
