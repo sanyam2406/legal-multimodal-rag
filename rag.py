@@ -145,17 +145,16 @@ def ask_question(question):
     if "nagarajan" in question.lower():
         forced_source = find_case_source(question)
 
-    # Better retrieval query based on question type
-    if query_type == "judgment":
-        retrieval_query = (
-            f"final judgment order decision allowed dismissed disposed held "
-            f"outcome result set aside {question}"
-        )
-    elif query_type == "reasoning":
+    if query_type == "reasoning":
         retrieval_query = (
             f"ratio decidendi reasoning rationale legal basis findings "
             f"why court held principle applied jurisdiction mortgage bank priority "
             f"{question}"
+        )
+    elif query_type == "judgment":
+        retrieval_query = (
+            f"final judgment order decision allowed dismissed disposed held "
+            f"outcome result set aside {question}"
         )
     elif query_type == "metadata":
         retrieval_query = f"court date judge bench coram {question}"
@@ -164,7 +163,8 @@ def ask_question(question):
     else:
         retrieval_query = question
 
-    results = vectordb.similarity_search_with_score(retrieval_query, k=10)
+    # Get more chunks for better context
+    results = vectordb.similarity_search_with_score(retrieval_query, k=15)
 
     if not results:
         return "No relevant chunks found.", []
