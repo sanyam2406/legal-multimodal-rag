@@ -123,16 +123,22 @@ def find_case_source(question):
         return f"data/{pdf_numbers[0]}.pdf"
     
     # 2. Try generic case name matching
+    print(f"DEBUG: Available case names: {list(case_names)[:3]}...")  # Show first 3
     for case_name in case_names:
         if case_name.lower() in q:
-            return case_to_source.get(case_name)
+            source = case_to_source.get(case_name)
+            print(f"DEBUG: Found case name '{case_name}' -> {source}")
+            return source
     
     # 3. Try partial case name matching
     for case_name in case_names:
         case_parts = case_name.lower().split(" vs ")
         if any(part in q for part in case_parts):
-            return case_to_source.get(case_name)
+            source = case_to_source.get(case_name)
+            print(f"DEBUG: Found partial case name '{case_name}' -> {source}")
+            return source
     
+    print("DEBUG: No case source found")
     return None
 
 
