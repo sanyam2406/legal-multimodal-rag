@@ -87,6 +87,11 @@ def answer(query, collection, client):
         if judgment_mode else
         "Answer using only the context below. If unsure, say so.\n\n"
     )
+    
+    # frontend using streamlit
+    # Remove JUDGMENT_RATIO_TRIGGERS
+    # Enrich base query: system_prompt
+    # then test the query 
 
     resp = client.chat.completions.create(
         model="gpt-4o",

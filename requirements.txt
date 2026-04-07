@@ -6,3 +6,5 @@ chromadb
 pypdf
 python-dotenv
 unstructured
+faster-whisper
+soundfile
