@@ -61,6 +61,21 @@ def answer_stream(query, collection, client, source_filter=None):
         query_kwargs["where"] = {"source": source_filter}
 
     results = collection.query(**query_kwargs)
+
+    # Auto-detect dominant source: if no manual filter and one PDF has strictly
+    # more chunks than any other, re-query restricted to that source only.
+    if not source_filter:
+        from collections import Counter
+        source_counts = Counter(m["source"] for m in results["metadatas"][0])
+        (top_source, top_count), *rest = source_counts.most_common()
+        second_count = rest[0][1] if rest else 0
+        if top_count > second_count:
+            results = collection.query(
+                query_texts=[retrieval_query],
+                n_results=8,
+                where={"source": top_source},
+            )
+
     context = "\n\n".join(results["documents"][0])
     sources = list(dict.fromkeys(m["source"] for m in results["metadatas"][0]))
 
