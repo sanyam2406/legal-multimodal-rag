@@ -13,7 +13,7 @@ PDF_DIR = "data/"
 DB_DIR = "chroma_db_new"
 COLLECTION = "simple_rag"
 
-
+ 
 def load_pdfs(folder):
     docs = []
     for path in glob.glob(f"{folder}/*.pdf"):

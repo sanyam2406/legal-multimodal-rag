@@ -5,3 +5,6 @@ __pycache__/
 db/
 .DS_Store
 data/
+
+.sqlite3 
+
