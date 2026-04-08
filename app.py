@@ -58,20 +58,28 @@ init_resources()
 def answer_stream(query, collection, client, source_filter=None):
     judgment_mode = is_judgment_ratio_query(query)
     base_query = clean_retrieval_query(query)
-    retrieval_query = f"{base_query} {LEGAL_ENRICHMENT}" if judgment_mode else base_query
 
     # --- Pre-filter: identify the correct document BEFORE semantic search ---
-    # For ratio/decidendi queries the embedding drifts toward generic legal
-    # language and retrieves chunks from the wrong PDFs. We fix this by doing
-    # a separate case-name-only lookup first, then restricting retrieval to
-    # that document via a metadata filter.
-    if not source_filter and judgment_mode:
+    if not source_filter:
         case_name = extract_case_name_from_query(query)
         auto_source = find_document_source(case_name, collection)
         if auto_source:
             source_filter = auto_source
 
-    query_kwargs = {"query_texts": [retrieval_query], "n_results": 8}
+    # Once the document is locked, use pure legal holding language for ratio
+    # queries — the user's raw question ("tell judgement ratio of...") doesn't
+    # semantically match holding/conclusion sections in the PDF.
+    if judgment_mode and source_filter:
+        retrieval_query = LEGAL_ENRICHMENT
+    elif judgment_mode:
+        retrieval_query = f"{base_query} {LEGAL_ENRICHMENT}"
+    else:
+        retrieval_query = base_query
+
+    # For ratio queries on a locked doc, fetch more chunks — the key holding
+    # paragraphs (summary of law, final order) can be spread across the doc.
+    n_results = 15 if (judgment_mode and source_filter) else 10
+    query_kwargs = {"query_texts": [retrieval_query], "n_results": n_results}
     if source_filter:
         query_kwargs["where"] = {"source": source_filter}
 
@@ -81,12 +89,12 @@ def answer_stream(query, collection, client, source_filter=None):
 
     if judgment_mode:
         system_prompt = (
-            "You are a legal assistant. Using ONLY the context below, identify the "
-            "binding legal principle (ratio decidendi) — the core reason why the court "
-            "decided in favour of or against the parties. Focus on the final order and "
-            "the court's reasoning. Do not fabricate. "
-            "If the context does not contain enough information to answer, say: "
-            "'The ratio decidendi for this case was not found in the indexed documents.'\n\n"
+            "You are a legal assistant. The context below contains excerpts from a court judgment. "
+            "Extract the ratio decidendi — the binding legal principle and the court's core reasoning "
+            "for its final decision. Look for phrases like 'we hold', 'we are of the view', "
+            "'sum up the law', 'writ petition is allowed/dismissed', 'it is accordingly'. "
+            "State the ratio clearly and concisely based on what is in the context. "
+            "Only say 'not found' if the context contains absolutely no reasoning or final order.\n\n"
         )
     else:
         system_prompt = "Answer using only the context below. If unsure, say so.\n\n"

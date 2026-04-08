@@ -43,8 +43,9 @@ JUDGMENT_RATIO_TRIGGERS = [
 ]
 
 LEGAL_ENRICHMENT = (
-    "final decision petition allowed dismissed final order of court "
-    "writ allowed disposed held that accordingly ordered judgment"
+    "held that accordingly the court found writ petition allowed dismissed "
+    "final order conclusion ratio decidendi binding principle court decided "
+    "the petitioner respondent ordered disposed judgment reasoning"
 )
 
 # Prefixes that add noise and hurt embedding similarity
@@ -80,11 +81,13 @@ def extract_case_name_from_query(query: str) -> str:
     # Remove ratio-trigger phrases first
     for trigger in JUDGMENT_RATIO_TRIGGERS:
         q = q.replace(trigger, " ")
-    # Remove generic question/filler words
+    # Remove generic question/filler words (also covers general queries like "tell about X case")
     for filler in [
         "what was", "what is", "what are", "tell me", "give me",
-        "explain the", "explain", " the ", " in ", " of ",
-        " about ", " for ", "case", "?", ",", ".",
+        "explain the", "explain", "tell about", "tell me about",
+        "summarize", "summary of", "what happened in",
+        " the ", " in ", " of ", " about ", " for ",
+        "case", "?", ",", ".",
     ]:
         q = q.replace(filler, " ")
     return " ".join(q.split()).strip()
