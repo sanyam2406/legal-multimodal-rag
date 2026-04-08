@@ -71,6 +71,49 @@ def clean_retrieval_query(query: str) -> str:
     return q
 
 
+def extract_case_name_from_query(query: str) -> str:
+    """
+    Strip ratio/question boilerplate from a query to isolate the case name.
+    e.g. "What was the judgment ratio in M Nagarajan case?" → "m nagarajan"
+    """
+    q = query.lower()
+    # Remove ratio-trigger phrases first
+    for trigger in JUDGMENT_RATIO_TRIGGERS:
+        q = q.replace(trigger, " ")
+    # Remove generic question/filler words
+    for filler in [
+        "what was", "what is", "what are", "tell me", "give me",
+        "explain the", "explain", " the ", " in ", " of ",
+        " about ", " for ", "case", "?", ",", ".",
+    ]:
+        q = q.replace(filler, " ")
+    return " ".join(q.split()).strip()
+
+
+def find_document_source(case_name: str, collection) -> str | None:
+    """
+    Two-stage lookup: query ChromaDB using only the case name to find which
+    PDF it belongs to. Returns the source filename if one document clearly
+    dominates (≥40% of top-10 results). Returns None if ambiguous.
+
+    This is the fix for cross-document drift on "ratio decidendi" queries:
+    we identify the correct document BEFORE running the semantic ratio query,
+    then apply a metadata pre-filter so retrieval never touches other PDFs.
+    """
+    if not case_name or len(case_name) < 3:
+        return None
+    from collections import Counter
+    results = collection.query(query_texts=[case_name], n_results=10)
+    if not results["metadatas"][0]:
+        return None
+    source_counts = Counter(m["source"] for m in results["metadatas"][0])
+    top_source, top_count = source_counts.most_common(1)[0]
+    total = sum(source_counts.values())
+    if top_count / total >= 0.4:
+        return top_source
+    return None
+
+
 def answer(query, collection, client):
     judgment_mode = is_judgment_ratio_query(query)
     base_query = clean_retrieval_query(query)

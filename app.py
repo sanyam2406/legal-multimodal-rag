@@ -8,6 +8,7 @@ from openai import OpenAI
 from new_rag import (
     load_pdfs, build_index,
     is_judgment_ratio_query, clean_retrieval_query,
+    extract_case_name_from_query, find_document_source,
     PDF_DIR, DB_DIR, COLLECTION, LEGAL_ENRICHMENT,
 )
 from audio_transcription import transcribe_audio
@@ -51,52 +52,54 @@ def init_resources():
 
 init_resources()
         
+# to add : name and date as a metadata to chunk 
+# prompt 
+
 def answer_stream(query, collection, client, source_filter=None):
     judgment_mode = is_judgment_ratio_query(query)
     base_query = clean_retrieval_query(query)
     retrieval_query = f"{base_query} {LEGAL_ENRICHMENT}" if judgment_mode else base_query
+
+    # --- Pre-filter: identify the correct document BEFORE semantic search ---
+    # For ratio/decidendi queries the embedding drifts toward generic legal
+    # language and retrieves chunks from the wrong PDFs. We fix this by doing
+    # a separate case-name-only lookup first, then restricting retrieval to
+    # that document via a metadata filter.
+    if not source_filter and judgment_mode:
+        case_name = extract_case_name_from_query(query)
+        auto_source = find_document_source(case_name, collection)
+        if auto_source:
+            source_filter = auto_source
 
     query_kwargs = {"query_texts": [retrieval_query], "n_results": 8}
     if source_filter:
         query_kwargs["where"] = {"source": source_filter}
 
     results = collection.query(**query_kwargs)
-
-    # Auto-detect dominant source: if no manual filter and one PDF has strictly
-    # more chunks than any other, re-query restricted to that source only.
-    if not source_filter:
-        from collections import Counter
-        source_counts = Counter(m["source"] for m in results["metadatas"][0])
-        (top_source, top_count), *rest = source_counts.most_common()
-        second_count = rest[0][1] if rest else 0
-        if top_count > second_count:
-            results = collection.query(
-                query_texts=[retrieval_query],
-                n_results=8,
-                where={"source": top_source},
-            )
-
     context = "\n\n".join(results["documents"][0])
     sources = list(dict.fromkeys(m["source"] for m in results["metadatas"][0]))
 
-    system_prompt = (
-        "You are a legal assistant. Using only the context below, identify the "
-        "binding legal principle (ratio decidendi) — the core reason why the court "
-        "decided in favour of or against the parties. Focus on the final order and "
-        "the court's reasoning. Do not fabricate.\n\n"
-        if judgment_mode else
-        "Answer using only the context below. If unsure, say so.\n\n"
-    )
+    if judgment_mode:
+        system_prompt = (
+            "You are a legal assistant. Using ONLY the context below, identify the "
+            "binding legal principle (ratio decidendi) — the core reason why the court "
+            "decided in favour of or against the parties. Focus on the final order and "
+            "the court's reasoning. Do not fabricate. "
+            "If the context does not contain enough information to answer, say: "
+            "'The ratio decidendi for this case was not found in the indexed documents.'\n\n"
+        )
+    else:
+        system_prompt = "Answer using only the context below. If unsure, say so.\n\n"
 
     stream = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": system_prompt + context},
             {"role": "user", "content": query},
         ],
         temperature=0.2,
         stream=True,
-    ) 
+    )
     return stream, sources
 
 with st.sidebar:
