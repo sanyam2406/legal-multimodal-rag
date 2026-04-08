@@ -150,6 +150,82 @@ def answer(query, collection, client):
     return resp.choices[0].message.content
 
 
+def get_collection():
+    ef = OpenAIEmbeddingFunction(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model_name="text-embedding-3-small",
+    )
+    client_db = chromadb.PersistentClient(path=DB_DIR)
+    col = client_db.get_or_create_collection(COLLECTION, embedding_function=ef)
+    return client_db, col
+
+
+def get_openai_client():
+    return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+def reindex(client_db):
+    client_db.delete_collection(COLLECTION)
+    ef = OpenAIEmbeddingFunction(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model_name="text-embedding-3-small",
+    )
+    col = client_db.get_or_create_collection(COLLECTION, embedding_function=ef)
+    docs = load_pdfs(PDF_DIR)
+    build_index(docs, col)
+    return col, docs
+
+
+def answer_stream(query, collection, client, source_filter=None):
+    judgment_mode = is_judgment_ratio_query(query)
+    base_query = clean_retrieval_query(query)
+
+    if not source_filter:
+        case_name = extract_case_name_from_query(query)
+        auto_source = find_document_source(case_name, collection)
+        if auto_source:
+            source_filter = auto_source
+
+    if judgment_mode and source_filter:
+        retrieval_query = LEGAL_ENRICHMENT
+    elif judgment_mode:
+        retrieval_query = f"{base_query} {LEGAL_ENRICHMENT}"
+    else:
+        retrieval_query = base_query
+
+    n_results = 15 if (judgment_mode and source_filter) else 10
+    query_kwargs = {"query_texts": [retrieval_query], "n_results": n_results}
+    if source_filter:
+        query_kwargs["where"] = {"source": source_filter}
+
+    results = collection.query(**query_kwargs)
+    context = "\n\n".join(results["documents"][0])
+    sources = list(dict.fromkeys(m["source"] for m in results["metadatas"][0]))
+
+    if judgment_mode:
+        system_prompt = (
+            "You are a legal assistant. The context below contains excerpts from a court judgment. "
+            "Extract the ratio decidendi — the binding legal principle and the court's core reasoning "
+            "for its final decision. Look for phrases like 'we hold', 'we are of the view', "
+            "'sum up the law', 'writ petition is allowed/dismissed', 'it is accordingly'. "
+            "State the ratio clearly and concisely based on what is in the context. "
+            "Only say 'not found' if the context contains absolutely no reasoning or final order.\n\n"
+        )
+    else:
+        system_prompt = "Answer using only the context below. If unsure, say so.\n\n"
+
+    stream = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_prompt + context},
+            {"role": "user", "content": query},
+        ],
+        temperature=0.2,
+        stream=True,
+    )
+    return stream, sources
+
+
 def main():
     ef = OpenAIEmbeddingFunction(
         api_key=os.getenv("OPENAI_API_KEY"), model_name="text-embedding-3-small"
