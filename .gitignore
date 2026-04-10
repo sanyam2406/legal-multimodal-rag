@@ -6,5 +6,23 @@ db/
 .DS_Store
 data/
 
-.sqlite3 
+.sqlite3
+chroma.sqlite3
+data_level0.bin
+
+# Cache directories
+.cache/
+__pycache__/
+*.pyc
+chroma_db_new/
+chroma_db/
+
+# Model cache
+huggingface/
+whisper/
+models/
+
+# OS files
+.DS_Store
+Thumbs.db 
 
