@@ -1,17 +1,23 @@
 import streamlit as st
 
-from new_rag import answer_stream, get_collection_stats, save_uploaded_pdf, reindex
-from audio_transcription import transcribe_audio
+from new_rag import (
+    answer_stream,
+    get_collection_stats,
+    ensure_indexed,
+    upload_and_reindex,
+    resolve_source_filter,
+    resolve_prompt,
+    make_message,
+)
+from audio_transcription import transcribe_audio, compute_audio_hash
 
 st.set_page_config(page_title="RAG Kanoon", page_icon="⚖️", layout="wide")
 
 
-def init_resources():
+def init_session_state():
     if "bootstrapped" not in st.session_state:
-        chunk_count, _ = get_collection_stats()
-        if chunk_count == 0:
-            with st.spinner("Indexing PDFs..."):
-                reindex()
+        with st.spinner("Initializing index..."):
+            ensure_indexed()
         st.session_state.bootstrapped = True
 
     if "messages" not in st.session_state:
@@ -24,7 +30,8 @@ def init_resources():
         st.session_state._submit_audio_clicked = False
 
 
-init_resources()
+init_session_state()
+
 
 with st.sidebar:
     st.title("RAG Kanoon")
@@ -32,7 +39,6 @@ with st.sidebar:
     st.divider()
 
     chunk_count, indexed_pdfs = get_collection_stats()
-
     st.metric("Indexed Chunks", chunk_count)
     st.metric("Documents", len(indexed_pdfs))
 
@@ -42,21 +48,16 @@ with st.sidebar:
 
     st.divider()
     st.subheader("Filter by Case")
-    selected_case = st.selectbox(
-        "Search within:",
-        options=["All Cases"] + indexed_pdfs,
-    )
-    source_filter = None if selected_case == "All Cases" else selected_case
+    selected_case = st.selectbox("Search within:", options=["All Cases"] + indexed_pdfs)
+    source_filter = resolve_source_filter(selected_case)
 
     st.divider()
     st.subheader("Upload New PDFs")
     uploaded = st.file_uploader("Drop PDFs here", type=["pdf"], accept_multiple_files=True)
 
     if uploaded and st.button("Upload & Re-index"):
-        for f in uploaded:
-            save_uploaded_pdf(f.name, f.getbuffer())
         with st.spinner("Re-indexing..."):
-            chunk_count, num_docs = reindex()
+            chunk_count, num_docs = upload_and_reindex([(f.name, f.getbuffer()) for f in uploaded])
         st.success(f"Indexed {chunk_count} chunks from {num_docs} PDFs")
         st.rerun()
 
@@ -67,22 +68,22 @@ def _on_submit_audio():
     st.session_state._submit_audio_clicked = True
 
 
+
 with st.expander("🎙️ Ask by voice", expanded=False):
     tab_mic, tab_file = st.tabs(["Microphone", "Upload Audio File"])
 
     with tab_mic:
         audio_value = st.audio_input("Record your legal question", key="mic_input")
         if audio_value is not None:
-            audio_hash = hash(audio_value.getvalue())
+            audio_hash = compute_audio_hash(audio_value.getvalue())
             if audio_hash != st.session_state.last_audio_hash:
                 with st.spinner("Transcribing..."):
                     try:
                         text = transcribe_audio(audio_value)
-                        if text:
-                            st.session_state.pending_audio_query = text
-                            st.session_state.last_audio_hash = audio_hash
-                        else:
-                            st.warning("No speech detected. Please try again.")
+                        st.session_state.pending_audio_query = text
+                        st.session_state.last_audio_hash = audio_hash
+                    except ValueError as e:
+                        st.warning(str(e))
                     except RuntimeError as e:
                         st.error(str(e))
 
@@ -95,10 +96,9 @@ with st.expander("🎙️ Ask by voice", expanded=False):
             with st.spinner("Transcribing..."):
                 try:
                     text = transcribe_audio(uploaded_audio)
-                    if text:
-                        st.session_state.pending_audio_query = text
-                    else:
-                        st.warning("No speech detected.")
+                    st.session_state.pending_audio_query = text
+                except ValueError as e:
+                    st.warning(str(e))
                 except RuntimeError as e:
                     st.error(str(e))
 
@@ -113,6 +113,7 @@ with st.expander("🎙️ Ask by voice", expanded=False):
                 st.session_state.pending_audio_query = None
                 st.rerun()
 
+
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -121,36 +122,30 @@ for msg in st.session_state.messages:
                 for s in msg["sources"]:
                     st.markdown(f"- `{s}`")
 
-_typed_prompt = st.chat_input("Ask a legal question...")
-prompt = _typed_prompt
 
-if (not prompt
-        and st.session_state.get("_submit_audio_clicked")
-        and st.session_state.get("pending_audio_query")):
-    prompt = st.session_state.pending_audio_query
+_typed_prompt = st.chat_input("Ask a legal question...")
+prompt, clear_audio = resolve_prompt(
+    _typed_prompt,
+    st.session_state._submit_audio_clicked,
+    st.session_state.pending_audio_query,
+)
+if clear_audio:
     st.session_state.pending_audio_query = None
     st.session_state._submit_audio_clicked = False
 
+
 if prompt:
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.messages.append(make_message("user", prompt))
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
         stream, sources = answer_stream(prompt, source_filter)
-        response = st.write_stream(
-            chunk.choices[0].delta.content
-            for chunk in stream
-            if chunk.choices[0].delta.content is not None
-        )
+        response = st.write_stream(stream)
         if sources:
             with st.expander("Sources"):
                 for s in sources:
                     st.markdown(f"- `{s}`")
 
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": response,
-        "sources": sources,
-    })
+    st.session_state.messages.append(make_message("assistant", response, sources))
 

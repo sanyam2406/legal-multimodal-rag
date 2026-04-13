@@ -151,8 +151,6 @@ def find_document_source(case_name: str, collection) -> str | None:
         return top_source
     return None
 
-
-
 def get_collection():
     ef = OpenAIEmbeddingFunction(
         api_key=os.getenv("OPENAI_API_KEY"),
@@ -174,9 +172,53 @@ def get_collection_stats():
     return col.count(), indexed_pdfs
 
 
+def resolve_source_filter(selected_case: str) -> str | None:
+    """Convert a UI case selection to a backend source filter (None means all cases)."""
+    return None if selected_case == "All Cases" else selected_case
+
+
+def resolve_prompt(typed_prompt, audio_clicked: bool, pending_audio: str | None):
+    """Determine the final prompt from typed input or a pending audio query.
+
+    Returns
+    -------
+    (prompt, clear_audio) : (str | None, bool)
+        prompt      – the text to send, or None if nothing to submit.
+        clear_audio – True if the caller should clear the pending audio state.
+    """
+    if typed_prompt:
+        return typed_prompt, False
+    if audio_clicked and pending_audio:
+        return pending_audio, True
+    return None, False
+
+
+def make_message(role: str, content: str, sources=None) -> dict:
+    """Build a chat history message dict."""
+    msg = {"role": role, "content": content}
+    if sources:
+        msg["sources"] = sources
+    return msg
+
+
+def ensure_indexed():
+    """Bootstrap: index PDFs if the collection is empty."""
+    chunk_count, indexed_pdfs = get_collection_stats()
+    if chunk_count == 0:
+        logger.info("[ensure_indexed] collection empty, running full index")
+        reindex()
+
+
 def save_uploaded_pdf(filename, data: bytes):
     with open(os.path.join(PDF_DIR, filename), "wb") as f:
         f.write(data)
+
+
+def upload_and_reindex(files):
+    """Save a list of (filename, bytes) PDFs and rebuild the index. Returns (chunk_count, num_docs)."""
+    for filename, data in files:
+        save_uploaded_pdf(filename, data)
+    return reindex()
 
 
 def reindex():
@@ -285,15 +327,17 @@ def answer_stream(query, source_filter=None):
         stream=True,
     )
 
-    # Wrap the stream to log latency to first token and total elapsed
+    # Wrap the stream: log latency and yield plain text tokens
     def _instrumented_stream():
         first_token = True
         for chunk in stream:
-            if first_token and chunk.choices[0].delta.content:
-                ttft = time.perf_counter() - llm_t0
-                logger.info("[answer_stream] time_to_first_token=%.3fs", ttft)
-                first_token = False
-            yield chunk
+            content = chunk.choices[0].delta.content
+            if content:
+                if first_token:
+                    ttft = time.perf_counter() - llm_t0
+                    logger.info("[answer_stream] time_to_first_token=%.3fs", ttft)
+                    first_token = False
+                yield content
         total_elapsed = time.perf_counter() - query_t0
         logger.info("[answer_stream] stream_complete  total_elapsed=%.3fs  sources=%s",
                     total_elapsed, sources)
@@ -317,10 +361,8 @@ def main():
         if q:
             stream, _ = answer_stream(q)
             print("\n\nA: ", end="", flush=True)
-            for chunk in stream:
-                content = chunk.choices[0].delta.content
-                if content:
-                    print(content, end="", flush=True)
+            for text in stream:
+                print(text, end="", flush=True)
             print("\n")
 
 

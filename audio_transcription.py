@@ -22,23 +22,18 @@ def _audio_to_float32(audio_file: io.IOBase) -> np.ndarray:
     return data
 
 
+def compute_audio_hash(audio_bytes: bytes) -> int:
+    """Return a hash of raw audio bytes for deduplication."""
+    return hash(audio_bytes)
+
+
 def transcribe_audio(audio_file: io.IOBase, language: str = "en") -> str:
     """Transcribe an audio file-like object to text.
 
-    Parameters
-    ----------
-    audio_file : file-like object
-        Accepts the UploadedFile returned by st.audio_input or st.file_uploader.
-    language : str
-        BCP-47 language code. Pass None to auto-detect.
-
-    Returns
-    -------
-    str
-        Transcribed text. Empty string if no speech detected.
-
     Raises
     ------
+    ValueError
+        If no speech is detected in the audio.
     RuntimeError
         Wraps any transcription error with a user-friendly message.
     """
@@ -52,8 +47,11 @@ def transcribe_audio(audio_file: io.IOBase, language: str = "en") -> str:
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 500},
         )
-        return " ".join(seg.text for seg in segments).strip()
+        text = " ".join(seg.text for seg in segments).strip()
+        if not text:
+            raise ValueError("No speech detected. Please try again.")
+        return text
+    except ValueError:
+        raise
     except Exception as exc:
         raise RuntimeError(f"Transcription failed: {exc}") from exc
-
-# ***REMOVED***
