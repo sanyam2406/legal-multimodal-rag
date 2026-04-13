@@ -1,31 +1,21 @@
-import os
 import streamlit as st
 
-from new_rag import (
-    load_pdfs, build_index, answer_stream,
-    get_collection, get_openai_client, reindex,
-    PDF_DIR,
-)
+from new_rag import answer_stream, get_collection_stats, save_uploaded_pdf, reindex
 from audio_transcription import transcribe_audio
 
 st.set_page_config(page_title="RAG Kanoon", page_icon="⚖️", layout="wide")
 
+
 def init_resources():
-    if "col" not in st.session_state:
-        client_db, col = get_collection()
-
-        if col.count() == 0:
+    if "bootstrapped" not in st.session_state:
+        chunk_count, _ = get_collection_stats()
+        if chunk_count == 0:
             with st.spinner("Indexing PDFs..."):
-                docs = load_pdfs(PDF_DIR)
-                build_index(docs, col)
-
-        st.session_state.client_db = client_db
-        st.session_state.col = col
-        st.session_state.openai_client = get_openai_client()
+                reindex()
+        st.session_state.bootstrapped = True
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
-
     if "pending_audio_query" not in st.session_state:
         st.session_state.pending_audio_query = None
     if "last_audio_hash" not in st.session_state:
@@ -33,20 +23,17 @@ def init_resources():
     if "_submit_audio_clicked" not in st.session_state:
         st.session_state._submit_audio_clicked = False
 
-init_resources()
-        
 
+init_resources()
 
 with st.sidebar:
     st.title("RAG Kanoon")
     st.caption("AI Legal Research Assistant")
     st.divider()
 
-    col = st.session_state.col
-    all_meta = col.get(include=["metadatas"])["metadatas"]
-    indexed_pdfs = sorted(set(m["source"] for m in all_meta)) if all_meta else []
+    chunk_count, indexed_pdfs = get_collection_stats()
 
-    st.metric("Indexed Chunks", col.count())
+    st.metric("Indexed Chunks", chunk_count)
     st.metric("Documents", len(indexed_pdfs))
 
     with st.expander("Indexed PDFs"):
@@ -67,19 +54,18 @@ with st.sidebar:
 
     if uploaded and st.button("Upload & Re-index"):
         for f in uploaded:
-            with open(os.path.join(PDF_DIR, f.name), "wb") as out:
-                out.write(f.getbuffer())
-
+            save_uploaded_pdf(f.name, f.getbuffer())
         with st.spinner("Re-indexing..."):
-            new_col, docs = reindex(st.session_state.client_db)
-        st.session_state.col = new_col
-        st.success(f"Indexed {new_col.count()} chunks from {len(docs)} PDFs")
+            chunk_count, num_docs = reindex()
+        st.success(f"Indexed {chunk_count} chunks from {num_docs} PDFs")
         st.rerun()
 
 st.header("Legal Research Chat")
 
+
 def _on_submit_audio():
     st.session_state._submit_audio_clicked = True
+
 
 with st.expander("🎙️ Ask by voice", expanded=False):
     tab_mic, tab_file = st.tabs(["Microphone", "Upload Audio File"])
@@ -151,9 +137,7 @@ if prompt:
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        stream, sources = answer_stream(
-            prompt, st.session_state.col, st.session_state.openai_client, source_filter
-        )
+        stream, sources = answer_stream(prompt, source_filter)
         response = st.write_stream(
             chunk.choices[0].delta.content
             for chunk in stream
@@ -170,7 +154,3 @@ if prompt:
         "sources": sources,
     })
 
-        
-        
-        
-        
