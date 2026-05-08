@@ -2,7 +2,6 @@ import os
 import glob
 import time
 from dotenv import load_dotenv
-from pypdf import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
@@ -15,24 +14,52 @@ load_dotenv()
 log_system_metrics("startup")
 
 PDF_DIR = "data/"
+IMAGE_DIR = "data/images/"
 DB_DIR = "chroma_db_new"
 COLLECTION = "simple_rag"
 
  
 @timed_fn("load_pdfs", log_metrics=True)
 def load_pdfs(folder):
-    docs = []
+    from pdf_extractor import extract_pdf_pages
+    all_pages = []
     pdf_paths = glob.glob(f"{folder}/*.pdf")
     logger.info("[load_pdfs] found %d PDF(s) in %s", len(pdf_paths), folder)
     for path in pdf_paths:
-        reader = PdfReader(path)
-        text = "\n".join(p.extract_text() or "" for p in reader.pages)
-        if text.strip():
-            docs.append({"text": text, "source": os.path.basename(path)})
-            logger.debug("[load_pdfs] loaded %s  pages=%d  chars=%d",
-                         os.path.basename(path), len(reader.pages), len(text))
-    logger.info("[load_pdfs] loaded %d non-empty document(s)", len(docs))
-    return docs
+        pages = extract_pdf_pages(path)
+        all_pages.extend(pages)
+        if pages:
+            logger.debug("[load_pdfs] %s → %d page segment(s)", os.path.basename(path), len(pages))
+    unique_pdfs = len({p["source"] for p in all_pages})
+    logger.info("[load_pdfs] %d page segment(s) from %d PDF(s)", len(all_pages), unique_pdfs)
+    return all_pages
+
+
+@timed_fn("load_images", log_metrics=False)
+def load_images(folder):
+    from PIL import Image
+    from ocr_engine import ocr_image, is_available
+    if not is_available():
+        logger.warning("[load_images] OCR unavailable — skipping image folder %s", folder)
+        return []
+    pages = []
+    image_paths = []
+    for ext in ("*.png", "*.jpg", "*.jpeg", "*.tiff", "*.bmp"):
+        image_paths.extend(glob.glob(os.path.join(folder, ext)))
+    logger.info("[load_images] found %d image file(s) in %s", len(image_paths), folder)
+    for path in image_paths:
+        source = os.path.basename(path)
+        try:
+            text = ocr_image(Image.open(path))
+            if len(text) >= 20:
+                pages.append({"text": text, "source": source, "page_num": 1, "source_type": "ocr"})
+                logger.debug("[load_images] %s → %d chars", source, len(text))
+            else:
+                logger.debug("[load_images] %s → no usable text (skipped)", source)
+        except Exception as e:
+            logger.warning("[load_images] failed on %s: %s", source, e)
+    logger.info("[load_images] %d image(s) with extractable text", len(pages))
+    return pages
 
 
 def build_index(docs, collection):
@@ -40,12 +67,17 @@ def build_index(docs, collection):
     total_chunks = 0
     with timed("build_index", log_metrics=True):
         for doc in docs:
+            page_num = doc.get("page_num", 0)
+            source_type = doc.get("source_type", "text")
             chunks = splitter.split_text(doc["text"])
-            ids = [f"{doc['source']}_{i}" for i in range(len(chunks))]
-            metas = [{"source": doc["source"]} for _ in chunks]
+            prefix = f"{doc['source']}_p{page_num}_{source_type}"
+            ids = [f"{prefix}_{i}" for i in range(len(chunks))]
+            metas = [{"source": doc["source"], "page_num": page_num, "source_type": source_type}
+                     for _ in chunks]
             collection.add(documents=chunks, metadatas=metas, ids=ids)
             total_chunks += len(chunks)
-            logger.debug("[build_index] %s → %d chunks", doc["source"], len(chunks))
+            logger.debug("[build_index] %s p%d [%s] → %d chunks",
+                         doc["source"], page_num, source_type, len(chunks))
     logger.info("[build_index] total chunks indexed: %d", total_chunks)
 
 
@@ -232,14 +264,15 @@ def reindex():
         model_name="text-embedding-3-small",
     )
     col = client_db.get_or_create_collection(COLLECTION, embedding_function=ef)
-    docs = load_pdfs(PDF_DIR)
+    docs = load_pdfs(PDF_DIR) + load_images(IMAGE_DIR)
     build_index(docs, col)
     elapsed = time.perf_counter() - t0
     chunk_count = col.count()
-    logger.info("[reindex] complete  chunks=%d  docs=%d  elapsed=%.2fs",
-                chunk_count, len(docs), elapsed)
+    num_sources = len({d["source"] for d in docs}) if docs else 0
+    logger.info("[reindex] complete  chunks=%d  sources=%d  elapsed=%.2fs",
+                chunk_count, num_sources, elapsed)
     log_system_metrics("reindex/end")
-    return chunk_count, len(docs)
+    return chunk_count, num_sources
 
 
 def answer_stream(query, source_filter=None):
