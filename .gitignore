@@ -27,3 +27,5 @@ models/
 Thumbs.db 
 
 logs/
+chroma_db/
+logs/
