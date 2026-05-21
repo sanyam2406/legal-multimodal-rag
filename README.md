@@ -1,7 +1,7 @@
 # Legal Multimodal RAG ⚖️
 > A multimodal legal research assistant powered by Retrieval-Augmented Generation
 
-Legal Multimodal RAG lets you query a corpus of Indian legal PDFs (including scanned documents) using natural language — by text or voice. It retrieves the most relevant precedents, helps identify key judgment ratios, and streams answers with source attribution.
+Legal Multimodal RAG lets you query a corpus of Indian legal PDFs (including scanned documents) using natural language — by text or voice. It finds relevant legal documents, extracts important insights, and provides answers with source references.
 
 ## Features
 
@@ -144,14 +144,3 @@ legal-multimodal-rag/
 ├── chroma_db/              # Vector store (gitignored)
 └── logs/                   # Runtime logs (gitignored)
 ```
-
----
-
-## Future Improvements
-
-- [ ] Support for multilingual queries (Hindi, Urdu) via Whisper language detection
-- [ ] Citation pinpointing — link answers to exact page numbers
-- [ ] BM25 hybrid retrieval alongside dense embeddings
-- [ ] FastAPI backend with REST endpoints for headless integration
-- [ ] Docker image for one-command deployment
-- [ ] User authentication for multi-tenant document access
