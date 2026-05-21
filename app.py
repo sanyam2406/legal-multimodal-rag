@@ -34,7 +34,7 @@ init_session_state()
 
 
 with st.sidebar:
-    st.title("Legal Multimodal RAG")
+    st.title("Doctrine RAG")
     st.caption("AI Legal Research Assistant")
     st.divider()
 
