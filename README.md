@@ -1,9 +1,7 @@
-# Legal RAG Assistant ⚖️
+# Legal Multimodal RAG ⚖️
 > A multimodal legal research assistant powered by Retrieval-Augmented Generation
 
-Legal RAG Assistant lets you query a corpus of Indian legal PDFs (including scanned documents) using natural language — by text or voice. It retrieves the most relevant precedents, helps identify key judgment ratios, and streams answers with source attribution.
-
----
+Legal Multimodal RAG lets you query a corpus of Indian legal PDFs (including scanned documents) using natural language — by text or voice. It retrieves the most relevant precedents, helps identify key judgment ratios, and streams answers with source attribution.
 
 ## Features
 

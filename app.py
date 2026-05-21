@@ -11,7 +11,7 @@ from new_rag import (
 )
 from audio_transcription import transcribe_audio, compute_audio_hash
 
-st.set_page_config(page_title="RAG Kanoon", page_icon="⚖️", layout="wide")
+st.set_page_config(page_title="Legal Multimodal RAG", page_icon="⚖️", layout="wide")
 
 
 def init_session_state():
@@ -34,7 +34,7 @@ init_session_state()
 
 
 with st.sidebar:
-    st.title("RAG Kanoon")
+    st.title("Legal Multimodal RAG")
     st.caption("AI Legal Research Assistant")
     st.divider()
 
