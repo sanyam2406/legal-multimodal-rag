@@ -90,8 +90,8 @@ sudo apt install tesseract-ocr
 ### Setup
 
 ```bash
-git clone https://github.com/sanyam2406/legal-rag-assistant.git
-cd legal-rag-assistant
+git clone https://github.com/sanyam2406/legal-multimodal-rag.git
+cd legal-multimodal-rag
 
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
@@ -133,7 +133,7 @@ streamlit run app.py
 ## Project Structure
 
 ```
-legal-rag-assistant/
+legal-multimodal-rag/
 ├── app.py                  # Streamlit entry point
 ├── new_rag.py              # Core RAG engine (indexing, retrieval, streaming)
 ├── audio_transcription.py  # Whisper transcription
